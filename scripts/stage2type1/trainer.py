@@ -69,12 +69,12 @@ class Trainer:
         self.scheduler = scheduler
         self.train_loss = []
         self.valid_loss = []
-        self.metric = None
-        self.metric_best = None
+        self.metric = 0.0
+        self.metric_best = 0.0
         self.gts = []
         self.outputs = []
-        self.log_dir = "./logs"
-        self.model_dir = "./models"
+        self.log_dir = cfg.log_dir
+        self.model_dir = cfg.model_dir
         os.makedirs(self.log_dir, exist_ok=True)
         os.makedirs(self.model_dir, exist_ok=True)
         self.log_file = os.path.join(self.log_dir, f"{cfg.kernel_type}.txt")
@@ -118,7 +118,6 @@ class Trainer:
             targets = targets.to(self.gpu_id)
 
             self._run_train_batch(images, targets)
-        self.train_loss = np.mean(self.train_loss)
 
     def _run_valid_batch(self, images, targets):
         logits = self.model(images)
@@ -143,7 +142,7 @@ class Trainer:
 
         self.outputs = torch.cat(self.outputs)
         self.gts = torch.cat(self.gts)
-        self.valid_loss = criterion(self.outputs, self.gts).item()
+        self.valid_loss = self.criterion(self.outputs, self.gts).item()
 
     def _save_snapshot(self, epoch):
         snapshot = {
@@ -160,13 +159,18 @@ class Trainer:
             if self.gpu_id == 0 and epoch % self.save_every == 0:
                 self._save_snapshot(epoch)
             self._run_valid_epoch(epoch)
+
             self.metric = self.valid_loss
 
             content = (
                 time.ctime()
                 + " "
-                + f'Fold {cfg.fold}, Epoch {epoch}, lr: {self.optimizer.param_groups[0]["lr"]:.7f}, train loss: {self.train_loss:.5f}, valid loss: {self.valid_loss:.5f}, metric: {(self.metric):.6f}.'
+                + f'Fold {cfg.fold}, Epoch {epoch}, lr: {self.optimizer.param_groups[0]["lr"]:.7f}, train loss: {np.mean(self.train_loss):.5f}, valid loss: {self.valid_loss:.5f}, metric: {(self.metric):.6f}.'
             )
+
+            self.outputs = []
+            self.gts = []
+            self.valid_loss = []
 
             print(content)
             with open(self.log_file, "a") as appender:
@@ -174,7 +178,7 @@ class Trainer:
 
             if self.metric < self.metric_best:
                 print(
-                    f"metric_best ({self.metric_best:.6f} --> {self.epochs_runmetric:.6f}). Saving model ..."
+                    f"metric_best ({self.metric_best:.6f} --> {self.metric:.6f}). Saving model ..."
                 )
                 torch.save(self.model.state_dict(), self.model_file)
                 self.metric_best = self.metric

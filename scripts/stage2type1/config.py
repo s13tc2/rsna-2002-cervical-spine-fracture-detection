@@ -38,7 +38,3 @@ class cfg:
 
     log_dir = "../logs"
     model_dir = "../models"
-
-
-os.makedirs(cfg.log_dir, exist_ok=True)
-os.makedirs(cfg.model_dir, exist_ok=True)
