@@ -20,7 +20,7 @@ class cfg:
 
     init_lr = 23e-5
     eta_min = 23e-6
-    batch_size = 8
+    batch_size = 16
     drop_rate = 0.0
     drop_rate_last = 0.3
     drop_path_rate = 0.0
@@ -31,7 +31,7 @@ class cfg:
         "../data/cropped_2d_224_15_ext0_5ch_0920_2m/cropped_2d_224_15_ext0_5ch_0920_2m"
     )
     use_amp = True
-    num_workers = 4
+    num_workers = 8
     out_dim = 1
 
     n_epochs = 75

@@ -34,10 +34,9 @@ from torch.distributed import init_process_group
 from config import cfg
 from mixup import mixup
 from loss import criterion
-from model import TimmModel
+from model import TimmModelType2
 from dataset import CLSDataset
 from transforms import get_train_transforms, get_valid_transforms
-
 
 class Trainer:
     def __init__(
@@ -68,11 +67,13 @@ class Trainer:
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.train_loss = []
+        self.train_loss1 = []
+        self.train_loss2 = []
         self.valid_loss = []
+        self.valid_loss1 = []
+        self.valid_loss2 = []
         self.metric = 0.0
         self.metric_best = 0.0
-        self.gts = []
-        self.outputs = []
         self.log_dir = cfg.log_dir
         self.model_dir = cfg.model_dir
         os.makedirs(self.log_dir, exist_ok=True)
@@ -97,15 +98,21 @@ class Trainer:
             images, targets, targets_mix, lam = mixup(images, targets)
 
         with amp.autocast():
-            logits = self.model(images)
-            loss = self.criterion(logits, targets)
+            logits, logits2 = self.model(images)
+            loss1 = self.criterion(logits, targets)
+            loss2 = self.criterion(logits2, targets.max(1).values)
+            loss = (loss1 * cfg.lw[0] + loss2 * cfg.lw[1]) / sum(cfg.lw)
             if do_mixup:
                 loss11 = self.criterion(logits, targets_mix)
-                loss = loss * lam + loss11 * (1 - lam)
+                loss22 = self.criterion(logits2, targets_mix.max(1).values)
+                loss = loss * lam  + (loss11 * cfg.lw[0] + loss22 * cfg.lw[1]) / sum(cfg.lw) * (1 - lam)
+        self.train_loss1.append(loss1.item())
+        self.train_loss2.append(loss2.item())
         self.train_loss.append(loss.item())
         self.scaler.scale(loss).backward()
         self.scaler.step(self.optimizer)
         self.scaler.update()
+
 
     def _run_train_epoch(self, epoch):
         b_sz = len(next(iter(self.loader_train))[0])
@@ -120,11 +127,13 @@ class Trainer:
             self._run_train_batch(images, targets)
 
     def _run_valid_batch(self, images, targets):
-        logits = self.model(images)
-        loss = self.criterion(logits, targets)
+        logits, logits2 = self.model(images)
+        loss1 = self.criterion(logits, targets)
+        loss2 = self.criterion(logits2, targets.max(1).values)
+        loss = (loss1 + loss2) / 2.
 
-        self.gts.append(targets.cpu())
-        self.outputs.append(logits.cpu())
+        self.valid_loss1.append(loss1.item())
+        self.valid_loss2.append(loss2.item())
         self.valid_loss.append(loss.item())
 
     def _run_valid_epoch(self, epoch):
@@ -139,10 +148,6 @@ class Trainer:
                 targets = targets.to(self.gpu_id)
 
                 self._run_valid_batch(images, targets)
-
-        self.outputs = torch.cat(self.outputs)
-        self.gts = torch.cat(self.gts)
-        self.valid_loss = self.criterion(self.outputs, self.gts).item()
 
     def _save_snapshot(self, epoch):
         snapshot = {
@@ -160,17 +165,13 @@ class Trainer:
                 self._save_snapshot(epoch)
             self._run_valid_epoch(epoch)
 
-            self.metric = self.valid_loss
+            self.metric = np.mean(self.valid_loss)
 
             content = (
                 time.ctime()
                 + " "
-                + f'Fold {cfg.fold}, Epoch {epoch}, lr: {self.optimizer.param_groups[0]["lr"]:.7f}, train loss: {np.mean(self.train_loss):.5f}, valid loss: {self.valid_loss:.5f}, metric: {(self.metric):.6f}.'
+                + f'Fold {cfg.fold}, Epoch {epoch}, lr: {self.optimizer.param_groups[0]["lr"]:.7f}, train loss: {np.mean(self.train_loss):.5f}, valid loss: {np.mean(self.valid_loss):.5f}, metric: {(self.metric):.6f}.'
             )
-
-            self.outputs = []
-            self.gts = []
-            self.valid_loss = []
 
             print(content)
             with open(self.log_file, "a") as appender:
@@ -187,27 +188,11 @@ class Trainer:
         torch.cuda.empty_cache()
         gc.collect()
 
-
-# trainer.py
 def load_data():
-    df = pd.read_csv(os.path.join(f"../data/train_seg.csv"))
-    df = df.sample(16).reset_index(drop=True) if cfg.DEBUG else df
-
-    sid = []
-    cs = []
-    label = []
-    fold = []
-    for _, row in df.iterrows():
-        for i in [1, 2, 3, 4, 5, 6, 7]:
-            sid.append(row.StudyInstanceUID)
-            cs.append(i)
-            label.append(row[f"C{i}"])
-            fold.append(row.fold)
-
-    df = pd.DataFrame({"StudyInstanceUID": sid, "c": cs, "label": label, "fold": fold})
-
-    return df
-
+  df = pd.read_csv('../data/train_seg.csv')
+  df = df.sample(16).reset_index(drop=True) if cfg.DEBUG else df
+  return df
+        
 
 def load_train_objs():
     df = load_data()
@@ -216,7 +201,7 @@ def load_train_objs():
     dataset_train = CLSDataset(train_, "train", transform=get_train_transforms())
     dataset_valid = CLSDataset(valid_, "valid", transform=get_valid_transforms())
 
-    model = TimmModel(cfg.backbone, pretrained=True)
+    model = TimmModelType2(cfg.backbone, pretrained=True)
 
     optimizer = optim.AdamW(model.parameters(), lr=cfg.init_lr)
     scaler = torch.cuda.amp.GradScaler() if cfg.use_amp else None
