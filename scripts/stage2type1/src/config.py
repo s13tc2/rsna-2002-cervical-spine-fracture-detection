@@ -31,7 +31,7 @@ class cfg:
         "../data/cropped_2d_224_15_ext0_5ch_0920_2m/cropped_2d_224_15_ext0_5ch_0920_2m"
     )
     use_amp = True
-    num_workers = 8
+    num_workers = 4
     out_dim = 1
 
     n_epochs = 75

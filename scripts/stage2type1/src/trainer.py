@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader, Dataset
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed import init_process_group
+from torch.distributed import init_process_group, destroy_process_group
 
 from config import cfg
 from mixup import mixup
@@ -158,14 +158,20 @@ class Trainer:
             self._run_train_epoch(epoch)
             if self.gpu_id == 0 and epoch % self.save_every == 0:
                 self._save_snapshot(epoch)
-            self._run_valid_epoch(epoch)
+            #self._run_valid_epoch(epoch)
 
-            self.metric = self.valid_loss
+            #self.metric = self.valid_loss
 
+            # content = (
+            #     time.ctime()
+            #     + " "
+            #     + f'Fold {cfg.fold}, Epoch {epoch}, lr: {self.optimizer.param_groups[0]["lr"]:.7f}, train loss: {np.mean(self.train_loss):.5f}, valid loss: {self.valid_loss:.5f}, metric: {(self.metric):.6f}.'
+            # )
+            
             content = (
                 time.ctime()
                 + " "
-                + f'Fold {cfg.fold}, Epoch {epoch}, lr: {self.optimizer.param_groups[0]["lr"]:.7f}, train loss: {np.mean(self.train_loss):.5f}, valid loss: {self.valid_loss:.5f}, metric: {(self.metric):.6f}.'
+                + f'Fold {cfg.fold}, Epoch {epoch}, lr: {self.optimizer.param_groups[0]["lr"]:.7f}, train loss: {np.mean(self.train_loss):.5f}.'
             )
 
             self.outputs = []
@@ -176,12 +182,12 @@ class Trainer:
             with open(self.log_file, "a") as appender:
                 appender.write(content + "\n")
 
-            if self.metric < self.metric_best:
-                print(
-                    f"metric_best ({self.metric_best:.6f} --> {self.metric:.6f}). Saving model ..."
-                )
-                torch.save(self.model.state_dict(), self.model_file)
-                self.metric_best = self.metric
+            # if self.metric < self.metric_best:
+            #     print(
+            #         f"metric_best ({self.metric_best:.6f} --> {self.metric:.6f}). Saving model ..."
+            #     )
+            #     torch.save(self.model.state_dict(), self.model_file)
+            #     self.metric_best = self.metric
 
         del self.model
         torch.cuda.empty_cache()
@@ -297,7 +303,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("save_every", type=int, help="How often to save a snapshot")
     parser.add_argument(
-        "--batch_size", default=32, help="Input batch size on each device (default: 32)"
+        "--batch_size", default=8, help="Input batch size on each device (default: 32)"
     )
     args = parser.parse_args()
 
